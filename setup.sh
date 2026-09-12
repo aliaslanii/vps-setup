@@ -18,26 +18,47 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-read -p "Enter personal sudo username [default: ali]: " USERNAME
-USERNAME=${USERNAME:-ali}
+if [ -t 0 ]; then
+  INPUT_DEV="/dev/stdin"
+elif [ -e /dev/tty ]; then
+  INPUT_DEV="/dev/tty"
+else
+  INPUT_DEV="/dev/null"
+fi
 
-read -p "Enter custom SSH Port [default: 9011]: " SSH_PORT
-SSH_PORT=${SSH_PORT:-9011}
+if [ "$INPUT_DEV" != "/dev/null" ]; then
+  read -p "Enter personal sudo username [default: ali]: " USERNAME < "$INPUT_DEV" || USERNAME="ali"
+  USERNAME=${USERNAME:-ali}
 
-echo -e "${YELLOW}Please paste your personal public SSH key (e.g. ssh-ed25519 AAA... user@laptop):${NC}"
-read -r SSH_PUB_KEY
+  read -p "Enter custom SSH Port [default: 9011]: " SSH_PORT < "$INPUT_DEV" || SSH_PORT="9011"
+  SSH_PORT=${SSH_PORT:-9011}
 
-read -p "Enter PHP version to install [default: 8.3]: " PHP_VERSION
-PHP_VERSION=${PHP_VERSION:-8.3}
+  echo -e "${YELLOW}Please paste your personal public SSH key (or leave empty to copy root's key):${NC}"
+  read -r SSH_PUB_KEY < "$INPUT_DEV" || SSH_PUB_KEY=""
 
-read -p "Enter Node.js major version to install (e.g., 20, 22) [default: 20]: " NODE_VERSION
-NODE_VERSION=${NODE_VERSION:-20}
+  read -p "Enter PHP version to install [default: 8.3]: " PHP_VERSION < "$INPUT_DEV" || PHP_VERSION="8.3"
+  PHP_VERSION=${PHP_VERSION:-8.3}
 
-read -p "Enter phpMyAdmin Port [default: 8080]: " PMA_PORT
-PMA_PORT=${PMA_PORT:-8080}
+  read -p "Enter Node.js major version to install (e.g., 20, 22) [default: 20]: " NODE_VERSION < "$INPUT_DEV" || NODE_VERSION="20"
+  NODE_VERSION=${NODE_VERSION:-20}
+
+  read -p "Enter phpMyAdmin Port [default: 8080]: " PMA_PORT < "$INPUT_DEV" || PMA_PORT="8080"
+  PMA_PORT=${PMA_PORT:-8080}
+else
+  USERNAME="ali"
+  SSH_PORT="9011"
+  SSH_PUB_KEY=""
+  PHP_VERSION="8.3"
+  NODE_VERSION="20"
+  PMA_PORT="8080"
+fi
 
 echo -e "${YELLOW}---> Updating system package lists and upgrading...${NC}"
 export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+if [ -f /etc/needrestart/needrestart.conf ]; then
+  sed -i "s/#\$nrconf{restart} = 'i';/\$nrconf{restart} = 'a';/g" /etc/needrestart/needrestart.conf || true
+fi
 apt-get update -y
 apt-get upgrade -y
 
