@@ -42,14 +42,21 @@ if [ "$INPUT_DEV" != "/dev/null" ]; then
   read -p "Enter Node.js major version to install (e.g., 20, 22) [default: 20]: " NODE_VERSION < "$INPUT_DEV" || NODE_VERSION="20"
   NODE_VERSION=${NODE_VERSION:-20}
 
-  read -p "Enter phpMyAdmin Port [default: 8080]: " PMA_PORT < "$INPUT_DEV" || PMA_PORT="8080"
-  PMA_PORT=${PMA_PORT:-8080}
+  read -p "Enter phpMyAdmin Domain (e.g. pma.domain.com) [leave empty for Port mode]: " PMA_DOMAIN < "$INPUT_DEV" || PMA_DOMAIN=""
+
+  if [ -z "$PMA_DOMAIN" ]; then
+    read -p "Enter phpMyAdmin Port [default: 8080]: " PMA_PORT < "$INPUT_DEV" || PMA_PORT="8080"
+    PMA_PORT=${PMA_PORT:-8080}
+  else
+    PMA_PORT="80"
+  fi
 else
   USERNAME="ali"
   SSH_PORT="9011"
   SSH_PUB_KEY=""
   PHP_VERSION="8.3"
   NODE_VERSION="20"
+  PMA_DOMAIN=""
   PMA_PORT="8080"
 fi
 
@@ -227,7 +234,31 @@ EOF
 chown -R www-data:www-data "$PMA_DIR"
 chmod -R 755 "$PMA_DIR"
 
-cat <<EOF > /etc/nginx/sites-available/phpmyadmin
+if [ -n "$PMA_DOMAIN" ]; then
+  cat <<EOF > /etc/nginx/sites-available/phpmyadmin
+server {
+    listen 80;
+    server_name ${PMA_DOMAIN};
+    root /var/www/phpmyadmin;
+    index index.php index.html index.htm;
+
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME \$realpath_root\$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+EOF
+else
+  cat <<EOF > /etc/nginx/sites-available/phpmyadmin
 server {
     listen ${PMA_PORT};
     server_name _;
@@ -249,6 +280,7 @@ server {
     }
 }
 EOF
+fi
 
 ln -sf /etc/nginx/sites-available/phpmyadmin /etc/nginx/sites-enabled/
 
@@ -259,7 +291,9 @@ ufw default allow outgoing
 ufw allow "${SSH_PORT}/tcp"
 ufw allow 80/tcp
 ufw allow 443/tcp
-ufw allow "${PMA_PORT}/tcp"
+if [ -z "$PMA_DOMAIN" ] && [ "$PMA_PORT" != "80" ] && [ "$PMA_PORT" != "443" ]; then
+  ufw allow "${PMA_PORT}/tcp"
+fi
 ufw --force enable
 
 echo -e "${YELLOW}---> Creating Nginx Server Block Templates for future projects...${NC}"
@@ -349,7 +383,22 @@ systemctl restart mysql
 systemctl restart nginx
 systemctl restart ssh || systemctl restart sshd
 
+if [ -n "$PMA_DOMAIN" ]; then
+  read -p "Do you want to configure free SSL (HTTPS) for ${PMA_DOMAIN}? (y/n) [default: y]: " PMA_SSL < "$INPUT_DEV" || PMA_SSL="y"
+  PMA_SSL=${PMA_SSL:-y}
+  if [ "$PMA_SSL" = "y" ] || [ "$PMA_SSL" = "Y" ]; then
+    echo -e "${YELLOW}---> Requesting SSL certificate via Certbot...${NC}"
+    certbot --nginx -d "${PMA_DOMAIN}" --non-interactive --agree-tos --register-unsafely-without-email || certbot --nginx -d "${PMA_DOMAIN}" || true
+  fi
+fi
+
 SERVER_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
+
+if [ -n "$PMA_DOMAIN" ]; then
+  PMA_URL="https://${PMA_DOMAIN} (or http://${PMA_DOMAIN})"
+else
+  PMA_URL="http://${SERVER_IP}:${PMA_PORT}/"
+fi
 
 echo -e "\n${GREEN}===================================================================${NC}"
 echo -e "${GREEN}       VPS Stack & Security Hardening Completed Successfully!      ${NC}"
@@ -360,14 +409,14 @@ echo -e " - SSH Port: ${YELLOW}${SSH_PORT}${NC}"
 echo -e " - Root Login: ${RED}Disabled (PermitRootLogin no)${NC}"
 echo -e " - Password Login: ${RED}Disabled (Key authentication only)${NC}"
 echo -e " - Fail2ban: ${GREEN}Active (SSH & Nginx protection)${NC}"
-echo -e " - Firewall (UFW): ${GREEN}Enabled (Ports ${SSH_PORT}, 80, 443, and ${PMA_PORT} allowed)${NC}"
+echo -e " - Firewall (UFW): ${GREEN}Active & Configured${NC}"
 echo -e ""
 echo -e "${BLUE}Installed software & services:${NC}"
 echo -e " - Git: \$(git --version)"
 echo -e " - PHP: \$(php -v | head -n 1)"
 echo -e " - Composer: \$(composer --version | head -n 1)"
 echo -e " - MySQL Server: \$(mysql --version)"
-echo -e " - phpMyAdmin: v\${PMA_VERSION} (Running on port \${PMA_PORT})"
+echo -e " - phpMyAdmin: v\${PMA_VERSION}"
 echo -e " - Redis Server: \$(redis-server --version | head -n 1)"
 echo -e " - Node.js: \$(node -v)"
 echo -e " - npm: \$(npm -v)"
@@ -375,7 +424,7 @@ echo -e " - PM2: \$(pm2 -v)"
 echo -e " - Nginx: \$(nginx -v 2>&1)"
 echo -e ""
 echo -e "${BLUE}Database & phpMyAdmin Credentials:${NC}"
-echo -e " - phpMyAdmin URL: ${YELLOW}http://\${SERVER_IP}:\${PMA_PORT}/${NC}"
+echo -e " - phpMyAdmin URL: ${YELLOW}${PMA_URL}${NC}"
 echo -e " - MySQL root user: ${YELLOW}root${NC}"
 echo -e " - MySQL root pass: ${YELLOW}\${MYSQL_ROOT_PASSWORD}${NC}"
 echo -e " - Sample DB name:  ${YELLOW}\${DB_NAME}${NC}"
