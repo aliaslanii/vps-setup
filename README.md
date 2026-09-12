@@ -7,7 +7,15 @@ A clean, robust bash script to configure a fresh Ubuntu VPS with production secu
 Login to your fresh VPS as root and run:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/<YOUR_GITHUB_USERNAME>/<YOUR_REPO_NAME>/main/setup.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/aliaslanii/vps-setup/main/setup.sh | sudo bash
+```
+
+Or clone and run locally:
+
+```bash
+git clone https://github.com/aliaslanii/vps-setup.git
+cd vps-setup
+sudo bash setup.sh
 ```
 
 ## Security & Hardening Features
