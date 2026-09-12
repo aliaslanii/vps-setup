@@ -198,19 +198,35 @@ systemctl enable mysql
 systemctl start mysql
 
 MYSQL_ROOT_PASSWORD=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
-
-echo -e "${YELLOW}---> Configuring MySQL root password and developer user...${NC}"
-mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PASSWORD}';"
-mysql -e "FLUSH PRIVILEGES;"
-
 DB_NAME="app_db"
 DB_USER="app_user"
 DB_PASS=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
 
-mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';"
-mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';"
-mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "FLUSH PRIVILEGES;"
+echo -e "${YELLOW}---> Configuring MySQL root password and developer user...${NC}"
+
+if mysql -e "SELECT 1;" >/dev/null 2>&1; then
+  mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PASSWORD}';" || \
+  mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';"
+  mysql -e "FLUSH PRIVILEGES;"
+elif [ -f /etc/mysql/debian.cnf ]; then
+  mysql --defaults-file=/etc/mysql/debian.cnf -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PASSWORD}';" || \
+  mysql --defaults-file=/etc/mysql/debian.cnf -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';"
+  mysql --defaults-file=/etc/mysql/debian.cnf -e "FLUSH PRIVILEGES;"
+fi
+
+if mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1;" >/dev/null 2>&1; then
+  MYSQL_EXEC="mysql -u root -p${MYSQL_ROOT_PASSWORD}"
+elif [ -f /etc/mysql/debian.cnf ]; then
+  MYSQL_EXEC="mysql --defaults-file=/etc/mysql/debian.cnf"
+else
+  MYSQL_EXEC="mysql"
+fi
+
+$MYSQL_EXEC -e "CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+$MYSQL_EXEC -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';"
+$MYSQL_EXEC -e "ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';"
+$MYSQL_EXEC -e "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';"
+$MYSQL_EXEC -e "FLUSH PRIVILEGES;"
 
 echo -e "${YELLOW}---> Installing Nginx...${NC}"
 wait_for_apt
