@@ -10,13 +10,22 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 echo -e "${BLUE}===================================================================${NC}"
-echo -e "${BLUE}    VPS Stack & Dependencies Auto-Setup (PHP, MySQL, Nginx, etc.)   ${NC}"
+echo -e "${BLUE}    VPS Stack, Security & Hardening Auto-Setup                      ${NC}"
 echo -e "${BLUE}===================================================================${NC}"
 
 if [ "$EUID" -ne 0 ]; then
   echo -e "${RED}Error: Please run this script as root (sudo bash setup.sh).${NC}"
   exit 1
 fi
+
+read -p "Enter personal sudo username [default: ali]: " USERNAME
+USERNAME=${USERNAME:-ali}
+
+read -p "Enter custom SSH Port [default: 9011]: " SSH_PORT
+SSH_PORT=${SSH_PORT:-9011}
+
+echo -e "${YELLOW}Please paste your personal public SSH key (e.g. ssh-ed25519 AAA... user@laptop):${NC}"
+read -r SSH_PUB_KEY
 
 read -p "Enter PHP version to install [default: 8.3]: " PHP_VERSION
 PHP_VERSION=${PHP_VERSION:-8.3}
@@ -32,8 +41,66 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get upgrade -y
 
-echo -e "${YELLOW}---> Installing common utilities (git, curl, zip, ufw, certbot, etc.)...${NC}"
-apt-get install -y software-properties-common curl wget git zip unzip build-essential ufw certbot python3-certbot-nginx libpng-dev libjpeg-dev libwebp-dev
+echo -e "${YELLOW}---> Installing common utilities & security packages...${NC}"
+apt-get install -y software-properties-common curl wget git zip unzip build-essential ufw certbot python3-certbot-nginx fail2ban libpng-dev libjpeg-dev libwebp-dev
+
+echo -e "${YELLOW}---> Configuring user: ${USERNAME} with sudo access...${NC}"
+if ! id -u "$USERNAME" >/dev/null 2>&1; then
+  useradd -m -s /bin/bash "$USERNAME"
+  usermod -aG sudo "$USERNAME"
+  echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/99-${USERNAME}"
+  chmod 0440 "/etc/sudoers.d/99-${USERNAME}"
+fi
+
+mkdir -p "/home/${USERNAME}/.ssh"
+chmod 700 "/home/${USERNAME}/.ssh"
+
+if [ -n "$SSH_PUB_KEY" ]; then
+  echo "$SSH_PUB_KEY" >> "/home/${USERNAME}/.ssh/authorized_keys"
+elif [ -f /root/.ssh/authorized_keys ]; then
+  cp /root/.ssh/authorized_keys "/home/${USERNAME}/.ssh/authorized_keys"
+fi
+
+touch "/home/${USERNAME}/.ssh/authorized_keys"
+chmod 600 "/home/${USERNAME}/.ssh/authorized_keys"
+chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}/.ssh"
+
+echo -e "${YELLOW}---> Hardening SSH daemon on port ${SSH_PORT}...${NC}"
+mkdir -p /etc/ssh/sshd_config.d
+cat <<EOF > /etc/ssh/sshd_config.d/99-security.conf
+Port ${SSH_PORT}
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
+UsePAM yes
+X11Forwarding no
+MaxAuthTries 3
+ClientAliveInterval 300
+ClientAliveCountMax 2
+EOF
+
+sed -i "s/^#\?Port .*/Port ${SSH_PORT}/g" /etc/ssh/sshd_config || true
+
+echo -e "${YELLOW}---> Configuring Fail2ban for SSH & Nginx...${NC}"
+cat <<EOF > /etc/fail2ban/jail.local
+[DEFAULT]
+bantime = 1h
+findtime = 10m
+maxretry = 5
+
+[sshd]
+enabled = true
+port = ${SSH_PORT}
+filter = sshd
+backend = systemd
+maxretry = 3
+EOF
+
+systemctl enable fail2ban
+systemctl restart fail2ban
 
 echo -e "${YELLOW}---> Adding ondrej/php PPA...${NC}"
 add-apt-repository -y ppa:ondrej/php
@@ -76,8 +143,9 @@ pm2 startup || true
 
 echo -e "${YELLOW}---> Installing Redis Server...${NC}"
 apt-get install -y redis-server
+sed -i 's/^bind .*/bind 127.0.0.1 ::1/g' /etc/redis/redis.conf || true
 systemctl enable redis-server
-systemctl start redis-server
+systemctl restart redis-server
 
 echo -e "${YELLOW}---> Installing MySQL Server...${NC}"
 apt-get install -y mysql-server
@@ -163,10 +231,14 @@ EOF
 
 ln -sf /etc/nginx/sites-available/phpmyadmin /etc/nginx/sites-enabled/
 
-echo -e "${YELLOW}---> Configuring Firewall (UFW)...${NC}"
-ufw allow OpenSSH
-ufw allow 'Nginx Full'
-ufw allow ${PMA_PORT}/tcp
+echo -e "${YELLOW}---> Configuring Hardened Firewall (UFW)...${NC}"
+ufw --force reset
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow "${SSH_PORT}/tcp"
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow "${PMA_PORT}/tcp"
 ufw --force enable
 
 echo -e "${YELLOW}---> Creating Nginx Server Block Templates for future projects...${NC}"
@@ -244,22 +316,31 @@ printf " / ___ |/ / /  / /_/ /(__  ) / / / /_/ / / / / / /    \n"
 printf "/_/  |_/_/_/   \__,_//____/ /_/  \__,_/ /_/ /_/_/     \n"
 printf "                                                     \n"
 printf "  Welcome back, Ali Aslani!\n"
-printf "  VPS Stack Ready (PHP, Composer, MySQL, phpMyAdmin, Nginx, Node.js)\n"
+printf "  VPS Stack Ready & Hardened (PHP, Composer, MySQL, phpMyAdmin, Nginx, Node.js)\n"
 printf "\033[0m\n"
 EOF
 chmod +x /etc/update-motd.d/99-aliaslani
 
-echo -e "${YELLOW}---> Testing and restarting services...${NC}"
+echo -e "${YELLOW}---> Validating configurations and restarting services...${NC}"
 nginx -t
 systemctl restart php${PHP_VERSION}-fpm
 systemctl restart mysql
 systemctl restart nginx
+systemctl restart ssh || systemctl restart sshd
 
 SERVER_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
 
 echo -e "\n${GREEN}===================================================================${NC}"
-echo -e "${GREEN}             VPS Stack Setup Completed Successfully!               ${NC}"
+echo -e "${GREEN}       VPS Stack & Security Hardening Completed Successfully!      ${NC}"
 echo -e "${GREEN}===================================================================${NC}"
+echo -e "${BLUE}Security & Access Details:${NC}"
+echo -e " - Sudo User: ${YELLOW}${USERNAME}${NC}"
+echo -e " - SSH Port: ${YELLOW}${SSH_PORT}${NC}"
+echo -e " - Root Login: ${RED}Disabled (PermitRootLogin no)${NC}"
+echo -e " - Password Login: ${RED}Disabled (Key authentication only)${NC}"
+echo -e " - Fail2ban: ${GREEN}Active (SSH & Nginx protection)${NC}"
+echo -e " - Firewall (UFW): ${GREEN}Enabled (Ports ${SSH_PORT}, 80, 443, and ${PMA_PORT} allowed)${NC}"
+echo -e ""
 echo -e "${BLUE}Installed software & services:${NC}"
 echo -e " - Git: \$(git --version)"
 echo -e " - PHP: \$(php -v | head -n 1)"
@@ -271,7 +352,6 @@ echo -e " - Node.js: \$(node -v)"
 echo -e " - npm: \$(npm -v)"
 echo -e " - PM2: \$(pm2 -v)"
 echo -e " - Nginx: \$(nginx -v 2>&1)"
-echo -e " - UFW Firewall: Enabled (SSH, Nginx Full, and Port \${PMA_PORT} allowed)"
 echo -e ""
 echo -e "${BLUE}Database & phpMyAdmin Credentials:${NC}"
 echo -e " - phpMyAdmin URL: ${YELLOW}http://\${SERVER_IP}:\${PMA_PORT}/${NC}"
@@ -281,9 +361,17 @@ echo -e " - Sample DB name:  ${YELLOW}\${DB_NAME}${NC}"
 echo -e " - Sample DB user:  ${YELLOW}\${DB_USER}${NC}"
 echo -e " - Sample DB pass:  ${YELLOW}\${DB_PASS}${NC}"
 echo -e ""
-echo -e "${BLUE}Nginx Project Templates:${NC}"
-echo -e " - Laravel: ${YELLOW}/etc/nginx/sites-available/laravel.template${NC}"
-echo -e " - Next.js: ${YELLOW}/etc/nginx/sites-available/nextjs.template${NC}"
+echo -e "${BLUE}To connect from your local terminal (~/.ssh/config):${NC}"
+echo -e "${CYAN}"
+echo -e "Host myserver"
+echo -e "    HostName ${SERVER_IP}"
+echo -e "    User ${USERNAME}"
+echo -e "    Port ${SSH_PORT}"
+echo -e "    IdentityFile ~/.ssh/id_ed25519"
+echo -e "${NC}"
+echo -e "${BLUE}Direct connect command:${NC}"
+echo -e "ssh -p ${SSH_PORT} ${USERNAME}@${SERVER_IP}"
 echo -e ""
-echo -e "${YELLOW}Save these credentials in a safe place!${NC}"
+echo -e "${YELLOW}IMPORTANT: DO NOT close this terminal before testing a connection in a new tab!${NC}"
 echo -e "${GREEN}===================================================================${NC}"
+
