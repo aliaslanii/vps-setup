@@ -1,29 +1,25 @@
-# VPS Auto-Setup for Laravel & Next.js
+# VPS Auto-Setup: Full Stack & Dependencies
 
-A comprehensive, interactive bash script to configure a fresh Ubuntu VPS for full-stack Laravel (PHP 8.2/8.3) and Next.js (Node.js/PM2) applications, utilizing Nginx as a reverse proxy, MySQL database, UFW firewall, and Certbot for SSL.
+A clean, robust bash script to configure a fresh Ubuntu VPS with all essential dependencies for Laravel (PHP), MySQL, phpMyAdmin, Redis, and Node.js (Next.js/PM2) web environments — without cloning or deploying user projects.
 
 ## Quick Installation
 
-Login to your fresh VPS as root and run the following command:
+Login to your fresh VPS as root and run:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/<YOUR_GITHUB_USERNAME>/<YOUR_REPO_NAME>/main/setup.sh | sudo bash
 ```
 
-## Features
+## Features & Installed Software
 
-- **System Updates**: Automatically updates package lists and upgrades.
-- **PHP & Extensions**: Installs PHP (8.3 default) with Laravel required extensions.
-- **Composer**: Installs the latest stable version globally.
-- **Node.js & PM2**: Installs Node.js LTS (v20 default) using modern NodeSource repo, and installs PM2 globally.
-- **MySQL**: Automatically installs MySQL, generates secure credentials, and sets up a database (`app_db`) and user (`app_user`).
-- **Nginx Configuration**: Installs Nginx, creates easy configuration templates, and prompts to configure custom domains for your deployed apps.
-- **Security**: Sets up UFW firewall (SSH, HTTP, HTTPS allowed).
-- **Interactive Deployments**: 
-  - Generates SSH keys.
-  - Automatically clones Laravel / Next.js projects via SSH.
-  - Installs vendors (`composer install` / `npm install`).
-  - Sets Laravel `.env` variables and runs migrations.
-  - Builds Next.js projects and runs them under PM2.
-  - Installs Let's Encrypt SSL (HTTPS) automatically using Certbot.
-- **Custom MOTD**: Renders a beautiful cyan ASCII welcome banner when logging into SSH.
+- **System Updates & Utilities**: Upgrades system packages and installs `curl`, `git`, `zip`, `unzip`, `build-essential`, `ufw`, `certbot`, etc.
+- **PHP & Extensions**: Installs chosen PHP version (default: `8.3`) via `ondrej/php` with all required extensions (`fpm`, `mysql`, `xml`, `curl`, `zip`, `gd`, `mbstring`, `bcmath`, `sqlite3`, `intl`, `redis`, `soap`, `imagick`).
+- **Composer**: Installs the latest stable Composer globally.
+- **Node.js & PM2**: Installs Node.js LTS (default: `20`) via NodeSource repo, with `npm` and `pm2` process manager configured.
+- **MySQL Server**: Installs and secures MySQL, generates credentials, and creates a ready-to-use database (`app_db`) and user (`app_user`).
+- **phpMyAdmin**: Installs latest stable phpMyAdmin with blowfish encryption and dedicated Nginx server block (default port: `8080`).
+- **Redis Server**: Installs and starts Redis cache & queue server.
+- **Nginx & Ready Templates**: Installs Nginx with ready-to-use virtual host templates for Laravel (`laravel.template`) and Next.js (`nextjs.template`).
+- **Security & Firewall**: Configures UFW firewall (SSH, Nginx Full, and phpMyAdmin port enabled).
+- **Custom MOTD**: Cyan ASCII welcome banner on SSH login.
+
