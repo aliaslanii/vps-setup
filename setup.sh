@@ -60,17 +60,26 @@ else
   PMA_PORT="8080"
 fi
 
+wait_for_apt() {
+  while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 ; do
+    echo -e "${YELLOW}---> Waiting for another package manager process to release lock...${NC}"
+    sleep 3
+  done
+}
+
 echo -e "${YELLOW}---> Updating system package lists and upgrading...${NC}"
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 if [ -f /etc/needrestart/needrestart.conf ]; then
   sed -i "s/#\$nrconf{restart} = 'i';/\$nrconf{restart} = 'a';/g" /etc/needrestart/needrestart.conf || true
 fi
-apt-get update -y
-apt-get upgrade -y
+wait_for_apt
+apt-get -o DPkg::Lock::Timeout=120 update -y
+apt-get -o DPkg::Lock::Timeout=120 upgrade -y
 
 echo -e "${YELLOW}---> Installing common utilities & security packages...${NC}"
-apt-get install -y software-properties-common curl wget git zip unzip build-essential ufw certbot python3-certbot-nginx fail2ban libpng-dev libjpeg-dev libwebp-dev
+wait_for_apt
+apt-get -o DPkg::Lock::Timeout=120 install -y software-properties-common curl wget git zip unzip build-essential ufw certbot python3-certbot-nginx fail2ban libpng-dev libjpeg-dev libwebp-dev
 
 echo -e "${YELLOW}---> Configuring user: ${USERNAME} with sudo access...${NC}"
 if ! id -u "$USERNAME" >/dev/null 2>&1; then
@@ -131,11 +140,14 @@ systemctl enable fail2ban
 systemctl restart fail2ban
 
 echo -e "${YELLOW}---> Adding ondrej/php PPA...${NC}"
+wait_for_apt
 add-apt-repository -y ppa:ondrej/php
-apt-get update -y
+wait_for_apt
+apt-get -o DPkg::Lock::Timeout=120 update -y
 
 echo -e "${YELLOW}---> Installing PHP ${PHP_VERSION} & extensions...${NC}"
-apt-get install -y \
+wait_for_apt
+apt-get -o DPkg::Lock::Timeout=120 install -y \
   php${PHP_VERSION} \
   php${PHP_VERSION}-cli \
   php${PHP_VERSION}-fpm \
@@ -158,25 +170,30 @@ mv composer.phar /usr/local/bin/composer
 chmod +x /usr/local/bin/composer
 
 echo -e "${YELLOW}---> Installing Node.js v${NODE_VERSION} & npm...${NC}"
-apt-get install -y ca-certificates gnupg
+wait_for_apt
+apt-get -o DPkg::Lock::Timeout=120 install -y ca-certificates gnupg
 mkdir -p /etc/apt/keyrings
 curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
 echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_VERSION}.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
-apt-get update -y
-apt-get install -y nodejs
+wait_for_apt
+apt-get -o DPkg::Lock::Timeout=120 update -y
+wait_for_apt
+apt-get -o DPkg::Lock::Timeout=120 install -y nodejs
 
 echo -e "${YELLOW}---> Installing PM2 globally...${NC}"
 npm install -g pm2
 pm2 startup || true
 
 echo -e "${YELLOW}---> Installing Redis Server...${NC}"
-apt-get install -y redis-server
+wait_for_apt
+apt-get -o DPkg::Lock::Timeout=120 install -y redis-server
 sed -i 's/^bind .*/bind 127.0.0.1 ::1/g' /etc/redis/redis.conf || true
 systemctl enable redis-server
 systemctl restart redis-server
 
 echo -e "${YELLOW}---> Installing MySQL Server...${NC}"
-apt-get install -y mysql-server
+wait_for_apt
+apt-get -o DPkg::Lock::Timeout=120 install -y mysql-server
 systemctl enable mysql
 systemctl start mysql
 
@@ -196,7 +213,8 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "GRANT ALL PRIVILEGES ON ${DB_NAME}.
 mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "FLUSH PRIVILEGES;"
 
 echo -e "${YELLOW}---> Installing Nginx...${NC}"
-apt-get install -y nginx
+wait_for_apt
+apt-get -o DPkg::Lock::Timeout=120 install -y nginx
 systemctl enable nginx
 systemctl start nginx
 
