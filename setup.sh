@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 
-# VPS Auto-Setup Script: Complete Dependencies & Web Stack
-# Installs: PHP, Composer, Nginx, MySQL, phpMyAdmin, Redis, Node.js, PM2
-# Designed for: Ubuntu 20.04 / 22.04 / 24.04 LTS
-
 set -e
 
 RED='\033[0;31m'
